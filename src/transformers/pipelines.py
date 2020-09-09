@@ -1697,8 +1697,13 @@ class QuestionAnsweringPipeline(Pipeline):
                     with torch.no_grad():
                         # Retrieve the score for the context tokens only (removing question tokens)
                         fw_args = {k: torch.tensor(v, device=self.device) for (k, v) in fw_args.items()}
-                        start, end = self.model(**fw_args)[:2]
+                        fw_args["output_attentions"] = True
+                        fw_args["output_hidden_states"] = True
+                        start, end, hidden_states, attentions = self.model(**fw_args)
+                        def convert_var_to_np(x): return np.asarray([layer.numpy() for layer in x])
                         start, end = start.cpu().numpy(), end.cpu().numpy()
+                        hidden_states, attentions = \
+                            convert_var_to_np(hidden_states), convert_var_to_np(attentions)
 
             min_null_score = 1000000  # large and positive
             answers = []
@@ -1732,6 +1737,8 @@ class QuestionAnsweringPipeline(Pipeline):
                         "score": score.item(),
                         "start": np.where(char_to_word == feature.token_to_orig_map[s])[0][0].item(),
                         "end": np.where(char_to_word == feature.token_to_orig_map[e])[0][-1].item(),
+                        "hidden_states": hidden_states,
+                        "attentions": attentions,
                         "answer": " ".join(
                             example.doc_tokens[feature.token_to_orig_map[s] : feature.token_to_orig_map[e] + 1]
                         ),
