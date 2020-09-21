@@ -213,7 +213,7 @@ class BertEmbeddings(nn.Module):
         embeddings = self.dropout(embeddings)
         return embeddings
 
-
+# MARK: Bert self attention impl
 class BertSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -270,7 +270,6 @@ class BertSelfAttention(nn.Module):
         if attention_mask is not None:
             # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
             attention_scores = attention_scores + attention_mask
-
         # Normalize the attention scores to probabilities.
         attention_probs = nn.Softmax(dim=-1)(attention_scores)
 
@@ -282,6 +281,9 @@ class BertSelfAttention(nn.Module):
         if head_mask is not None:
             attention_probs = attention_probs * head_mask
 
+        # MARK: sparsity bar dropout
+        # drop all values that are smaller than sparsity bar
+        attention_probs = attention_probs * (attention_probs > 0.0005)
         context_layer = torch.matmul(attention_probs, value_layer)
 
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
