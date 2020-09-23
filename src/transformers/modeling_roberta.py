@@ -701,7 +701,7 @@ class RobertaClassificationHead(nn.Module):
         x = self.out_proj(x)
         return x
 
-
+# MARK: roberta model for qa
 @add_start_docstrings(
     """Roberta Model with a span classification head on top for extractive question-answering tasks like SQuAD (a linear layers on top of
     the hidden-states output to compute `span start logits` and `span end logits`). """,

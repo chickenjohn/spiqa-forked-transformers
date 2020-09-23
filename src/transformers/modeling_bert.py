@@ -283,7 +283,7 @@ class BertSelfAttention(nn.Module):
 
         # MARK: sparsity bar dropout
         # drop all values that are smaller than sparsity bar
-        attention_probs = attention_probs * (attention_probs > 0.0005)
+        attention_probs = attention_probs * (attention_probs > 0.005)
         context_layer = torch.matmul(attention_probs, value_layer)
 
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
