@@ -1611,6 +1611,7 @@ class QuestionAnsweringPipeline(Pipeline):
         else:
             return SquadExample(None, question, context, None, None, None)
 
+    # MARK: qa pipeline call
     def __call__(self, *args, **kwargs):
         """
         Answer the question(s) given as inputs by using the context(s).
@@ -1700,7 +1701,7 @@ class QuestionAnsweringPipeline(Pipeline):
                         fw_args["output_attentions"] = True
                         fw_args["output_hidden_states"] = True
                         start, end, hidden_states, attentions = self.model(**fw_args)
-                        def convert_var_to_np(x): return np.asarray([layer.numpy() for layer in x])
+                        def convert_var_to_np(x): return np.asarray([layer.cpu().numpy() for layer in x])
                         start, end = start.cpu().numpy(), end.cpu().numpy()
                         hidden_states, attentions = \
                             convert_var_to_np(hidden_states), convert_var_to_np(attentions)
