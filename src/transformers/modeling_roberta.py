@@ -740,6 +740,7 @@ class RobertaForQuestionAnswering(BertPreTrainedModel):
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
+        spars_threshold=0.0
     ):
         r"""
         start_positions (:obj:`torch.LongTensor` of shape :obj:`(batch_size,)`, `optional`):
@@ -763,6 +764,7 @@ class RobertaForQuestionAnswering(BertPreTrainedModel):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
+            spars_threshold=spars_threshold
         )
 
         sequence_output = outputs[0]

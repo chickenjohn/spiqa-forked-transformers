@@ -246,6 +246,7 @@ class BertSelfAttention(nn.Module):
         encoder_hidden_states=None,
         encoder_attention_mask=None,
         output_attentions=False,
+        spars_threshold=0.0
     ):
         mixed_query_layer = self.query(hidden_states)
 
@@ -283,7 +284,9 @@ class BertSelfAttention(nn.Module):
 
         # MARK: sparsity bar dropout
         # drop all values that are smaller than sparsity bar
-        attention_probs = attention_probs * (attention_probs > 0.005)
+        if spars_threshold > 0.0:
+            attention_probs = attention_probs * (attention_probs > spars_threshold)
+
         context_layer = torch.matmul(attention_probs, value_layer)
 
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
@@ -341,6 +344,7 @@ class BertAttention(nn.Module):
         encoder_hidden_states=None,
         encoder_attention_mask=None,
         output_attentions=False,
+        spars_threshold=0.0
     ):
         self_outputs = self.self(
             hidden_states,
@@ -349,6 +353,7 @@ class BertAttention(nn.Module):
             encoder_hidden_states,
             encoder_attention_mask,
             output_attentions,
+            spars_threshold
         )
         attention_output = self.output(self_outputs[0], hidden_states)
         outputs = (attention_output,) + self_outputs[1:]  # add attentions if we output them
@@ -406,12 +411,14 @@ class BertLayer(nn.Module):
         encoder_hidden_states=None,
         encoder_attention_mask=None,
         output_attentions=False,
+        spars_threshold=0.0
     ):
         self_attention_outputs = self.attention(
             hidden_states,
             attention_mask,
             head_mask,
             output_attentions=output_attentions,
+            spars_threshold=spars_threshold
         )
         attention_output = self_attention_outputs[0]
         outputs = self_attention_outputs[1:]  # add self attentions if we output attention weights
@@ -459,6 +466,7 @@ class BertEncoder(nn.Module):
         output_attentions=False,
         output_hidden_states=False,
         return_dict=False,
+        spars_threshold=0.0
     ):
         all_hidden_states = () if output_hidden_states else None
         all_attentions = () if output_attentions else None
@@ -490,6 +498,7 @@ class BertEncoder(nn.Module):
                     encoder_hidden_states,
                     encoder_attention_mask,
                     output_attentions,
+                    spars_threshold
                 )
             hidden_states = layer_outputs[0]
             if output_attentions:
@@ -768,6 +777,7 @@ class BertModel(BertPreTrainedModel):
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
+        spars_threshold=0.0
     ):
         r"""
         encoder_hidden_states  (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, hidden_size)`, `optional`):
@@ -835,6 +845,7 @@ class BertModel(BertPreTrainedModel):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
+            spars_threshold=spars_threshold
         )
         sequence_output = encoder_outputs[0]
         pooled_output = self.pooler(sequence_output)
