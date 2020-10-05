@@ -285,7 +285,8 @@ class BertSelfAttention(nn.Module):
         # MARK: sparsity bar dropout
         # drop all values that are smaller than sparsity bar
         if spars_threshold > 0.0:
-            attention_probs = attention_probs * (attention_probs > spars_threshold)
+            abs_threshold = torch.unsqueeze(torch.max(attention_probs, dim=-1)[0] * spars_threshold, dim=-1)
+            attention_probs = attention_probs * (attention_probs > abs_threshold)
 
         context_layer = torch.matmul(attention_probs, value_layer)
 
