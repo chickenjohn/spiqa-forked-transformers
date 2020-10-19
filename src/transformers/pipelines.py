@@ -1702,11 +1702,17 @@ class QuestionAnsweringPipeline(Pipeline):
                         fw_args["spars_threshold"] = kwargs["spars_threshold"]
                         fw_args["output_attentions"] = True
                         fw_args["output_hidden_states"] = True
+                        attn_mask = (torch.sum(fw_args['attention_mask'], dim=-1)).cpu().numpy()
                         start, end, hidden_states, attentions = self.model(**fw_args)
-                        def convert_var_to_np(x): return np.asarray([layer.cpu().numpy() for layer in x])
+                        def convert_hid_to_np(x): return np.asarray([layer.cpu().numpy() for layer in x])
+                        def convert_att_to_np(x): 
+                            temp, res = np.asarray([layer.cpu().numpy() for layer in x]), []
+                            for i in range(temp.shape[1]):
+                                res.append(np.squeeze(temp[:, i, :, :, :attn_mask[i]]))
+                            return res
                         start, end = start.cpu().numpy(), end.cpu().numpy()
                         hidden_states, attentions = \
-                            convert_var_to_np(hidden_states), convert_var_to_np(attentions)
+                            convert_hid_to_np(hidden_states), convert_att_to_np(attentions)
 
             min_null_score = 1000000  # large and positive
             answers = []
