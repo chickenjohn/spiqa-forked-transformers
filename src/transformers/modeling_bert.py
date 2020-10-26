@@ -360,6 +360,7 @@ class BertAttention(nn.Module):
             output_attentions,
             spars_threshold
         )
+        #self_outputs[0]: context; self_outputs[1:]: attentions
         attention_output = self.output(self_outputs[0], hidden_states)
         outputs = (attention_output,) + self_outputs[1:]  # add attentions if we output them
         return outputs
@@ -454,7 +455,7 @@ class BertLayer(nn.Module):
         layer_output = self.output(intermediate_output, attention_output)
         return layer_output
 
-
+#MARK: Bert Encoder Impl
 class BertEncoder(nn.Module):
     def __init__(self, config):
         super().__init__()
