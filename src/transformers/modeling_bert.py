@@ -273,6 +273,13 @@ class BertSelfAttention(nn.Module):
             attention_scores = attention_scores + attention_mask
         # Normalize the attention scores to probabilities.
         attention_probs = nn.Softmax(dim=-1)(attention_scores)
+        # MARK: customized mask
+        actual_len = torch.sum(attention_mask == 0)
+        single_head_mask = torch.zeros((attention_probs.shape[-2:]))
+        single_head_mask[:actual_len, :actual_len] = torch.ones((actual_len, actual_len))
+        new_mask = torch.stack([single_head_mask]*attention_probs.shape[1], dim=0).reshape(attention_probs.shape).to(attention_probs.get_device())
+        attention_probs = attention_probs * new_mask 
+
 
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
