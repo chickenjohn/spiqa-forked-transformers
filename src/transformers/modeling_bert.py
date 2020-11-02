@@ -279,7 +279,9 @@ class BertSelfAttention(nn.Module):
             single_head_mask = torch.zeros((attention_probs[i].shape[-2:]))
             single_head_mask[:actual_len, :actual_len] = torch.ones((actual_len, actual_len))
             new_mask = torch.stack([single_head_mask]*attention_probs[i].shape[0], dim=0) \
-                        .reshape(attention_probs[i].shape).to(attention_probs.get_device())
+                        .reshape(attention_probs[i].shape)
+            if new_mask.get_device() != attention_probs.get_device():
+                new_mask = new_mask.to(attention_probs.get_device())
             attention_probs[i] = attention_probs[i] * new_mask 
 
 
