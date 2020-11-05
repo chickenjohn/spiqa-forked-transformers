@@ -1661,7 +1661,8 @@ class QuestionAnsweringPipeline(Pipeline):
         kwargs.setdefault("max_seq_len", 384)
         kwargs.setdefault("max_question_len", 64)
         kwargs.setdefault("handle_impossible_answer", False)
-        kwargs.setdefault("spars_threshold", 0.0)
+        kwargs.setdefault("att_threshold", 0.0)
+        kwargs.setdefault("hs_threshold", 0.0)
 
         if kwargs["topk"] < 1:
             raise ValueError("topk parameter should be >= 1 (got {})".format(kwargs["topk"]))
@@ -1699,7 +1700,8 @@ class QuestionAnsweringPipeline(Pipeline):
                     with torch.no_grad():
                         # Retrieve the score for the context tokens only (removing question tokens)
                         fw_args = {k: torch.tensor(v, device=self.device) for (k, v) in fw_args.items()}
-                        fw_args["spars_threshold"] = kwargs["spars_threshold"]
+                        fw_args["att_threshold"] = kwargs["att_threshold"]
+                        fw_args["hs_threshold"] = kwargs["hs_threshold"]
                         fw_args["output_attentions"] = True
                         fw_args["output_hidden_states"] = True
                         attn_mask = (torch.sum(fw_args['attention_mask'], dim=-1)).cpu().numpy()

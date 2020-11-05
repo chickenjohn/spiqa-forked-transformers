@@ -246,7 +246,7 @@ class BertSelfAttention(nn.Module):
         encoder_hidden_states=None,
         encoder_attention_mask=None,
         output_attentions=False,
-        spars_threshold=0.0
+        att_threshold=0.0
     ):
         # hidden states shape: (instances, seq_len, 768)
         mixed_query_layer = self.query(hidden_states)
@@ -297,13 +297,13 @@ class BertSelfAttention(nn.Module):
 
         # MARK: sparsity bar dropout
         # drop all values that are smaller than sparsity bar
-        if spars_threshold > 0.0:
+        if att_threshold > 0.0:
             # Different ways of dropping values:
             # dynamic threshold based on row max val:
-            abs_threshold = torch.unsqueeze(torch.max(attention_probs, dim=-1)[0] * spars_threshold, dim=-1)
+            abs_threshold = torch.unsqueeze(torch.max(attention_probs, dim=-1)[0] * att_threshold, dim=-1)
             attention_probs = attention_probs * (attention_probs > abs_threshold)
             # static threshold:
-            # attention_probs = attention_probs * (attention_probs > spars_threshold)
+            # attention_probs = attention_probs * (attention_probs > att_threshold)
 
         context_layer = torch.matmul(attention_probs, value_layer)
 
@@ -363,7 +363,7 @@ class BertAttention(nn.Module):
         encoder_hidden_states=None,
         encoder_attention_mask=None,
         output_attentions=False,
-        spars_threshold=0.0
+        att_threshold=0.0
     ):
         self_outputs = self.self(
             hidden_states,
@@ -372,7 +372,7 @@ class BertAttention(nn.Module):
             encoder_hidden_states,
             encoder_attention_mask,
             output_attentions,
-            spars_threshold
+            att_threshold
         )
         #self_outputs[0]: context; self_outputs[1:]: attentions
         attention_output = self.output(self_outputs[0], hidden_states)
@@ -431,14 +431,15 @@ class BertLayer(nn.Module):
         encoder_hidden_states=None,
         encoder_attention_mask=None,
         output_attentions=False,
-        spars_threshold=0.0
+        att_threshold=0.0,
+        hs_threshold=0.0
     ):
         self_attention_outputs = self.attention(
             hidden_states,
             attention_mask,
             head_mask,
             output_attentions=output_attentions,
-            spars_threshold=spars_threshold
+            att_threshold=att_threshold
         )
         attention_output = self_attention_outputs[0]
         outputs = self_attention_outputs[1:]  # add self attentions if we output attention weights
@@ -461,6 +462,10 @@ class BertLayer(nn.Module):
         layer_output = apply_chunking_to_forward(
             self.feed_forward_chunk, self.chunk_size_feed_forward, self.seq_len_dim, attention_output
         )
+        if hs_threshold > 0.0:
+            layer_output_mask = (layer_output > hs_threshold) | (layer_output < (-hs_threshold))
+            layer_output = layer_output_mask * layer_output
+
         outputs = (layer_output,) + outputs
         return outputs
 
@@ -486,7 +491,8 @@ class BertEncoder(nn.Module):
         output_attentions=False,
         output_hidden_states=False,
         return_dict=False,
-        spars_threshold=0.0
+        att_threshold=0.0,
+        hs_threshold=0.0
     ):
         all_hidden_states = () if output_hidden_states else None
         all_attentions = () if output_attentions else None
@@ -518,7 +524,8 @@ class BertEncoder(nn.Module):
                     encoder_hidden_states,
                     encoder_attention_mask,
                     output_attentions,
-                    spars_threshold
+                    att_threshold,
+                    hs_threshold
                 )
             hidden_states = layer_outputs[0]
             if output_attentions:
@@ -797,7 +804,8 @@ class BertModel(BertPreTrainedModel):
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
-        spars_threshold=0.0
+        att_threshold=0.0,
+        hs_threshold=0.0
     ):
         r"""
         encoder_hidden_states  (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, hidden_size)`, `optional`):
@@ -865,7 +873,8 @@ class BertModel(BertPreTrainedModel):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
-            spars_threshold=spars_threshold
+            att_threshold=att_threshold,
+            hs_threshold=hs_threshold
         )
         sequence_output = encoder_outputs[0]
         pooled_output = self.pooler(sequence_output)
