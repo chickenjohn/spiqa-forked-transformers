@@ -278,6 +278,7 @@ class BertSelfAttention(nn.Module):
         # MARK: customized mask
         for i in range(attention_probs.shape[0]):
             actual_len = torch.sum(attention_mask[i] == 0)
+            actual_len = actual_len.item()
             single_head_mask = torch.zeros((attention_probs[i].shape[-2:]))
             single_head_mask[:actual_len, :actual_len] = torch.ones((actual_len, actual_len))
             new_mask = torch.stack([single_head_mask]*attention_probs[i].shape[0], dim=0) \
