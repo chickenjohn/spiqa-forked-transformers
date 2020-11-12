@@ -1663,6 +1663,7 @@ class QuestionAnsweringPipeline(Pipeline):
         kwargs.setdefault("handle_impossible_answer", False)
         kwargs.setdefault("att_threshold", 0.0)
         kwargs.setdefault("hs_threshold", 0.0)
+        kwargs.setdefault("head_mask", None)
 
         if kwargs["topk"] < 1:
             raise ValueError("topk parameter should be >= 1 (got {})".format(kwargs["topk"]))
@@ -1699,8 +1700,9 @@ class QuestionAnsweringPipeline(Pipeline):
                 else:
                     with torch.no_grad():
                         # Retrieve the score for the context tokens only (removing question tokens)
-                        fw_args["head_mask"] = kwargs["head_mask"]
                         fw_args = {k: torch.tensor(v, device=self.device) for (k, v) in fw_args.items()}
+                        if kwargs["head_mask"] is not None:
+                            fw_args["head_mask"] = torch.tensor(kwargs["head_mask"], device=self.device)
                         fw_args["att_threshold"] = kwargs["att_threshold"]
                         fw_args["hs_threshold"] = kwargs["hs_threshold"]
                         fw_args["output_attentions"] = True
