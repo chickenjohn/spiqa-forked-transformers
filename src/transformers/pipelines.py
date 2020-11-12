@@ -1699,6 +1699,7 @@ class QuestionAnsweringPipeline(Pipeline):
                 else:
                     with torch.no_grad():
                         # Retrieve the score for the context tokens only (removing question tokens)
+                        fw_args["head_mask"] = kwargs["head_mask"]
                         fw_args = {k: torch.tensor(v, device=self.device) for (k, v) in fw_args.items()}
                         fw_args["att_threshold"] = kwargs["att_threshold"]
                         fw_args["hs_threshold"] = kwargs["hs_threshold"]

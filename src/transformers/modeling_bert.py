@@ -292,19 +292,21 @@ class BertSelfAttention(nn.Module):
         # seem a bit unusual, but is taken from the original Transformer paper.
         attention_probs = self.dropout(attention_probs)
 
-        # Mask heads if we want to
-        if head_mask is not None:
+        if (head_mask is not None) and att_threshold > 0.0:
+            # apply threshold only to the masked heads
+            rev_head_mask = (head_mask - 1) < 0
+            attention_probs = attention_probs * head_mask + attention_probs * ((attention_probs * rev_head_mask) > att_threshold)
+        elif head_mask is not None:
+            # mask heads if we want:
             attention_probs = attention_probs * head_mask
-
-        # MARK: sparsity bar dropout
-        # drop all values that are smaller than sparsity bar
-        if att_threshold > 0.0:
+        elif att_threshold > 0.0:
             # Different ways of dropping values:
             # dynamic threshold based on row max val:
-            abs_threshold = torch.unsqueeze(torch.max(attention_probs, dim=-1)[0] * att_threshold, dim=-1)
-            attention_probs = attention_probs * (attention_probs > abs_threshold)
+            # abs_threshold = torch.unsqueeze(torch.max(attention_probs, dim=-1)[0] * att_threshold, dim=-1)
+            # attention_probs = attention_probs * (attention_probs > abs_threshold)
             # static threshold:
-            # attention_probs = attention_probs * (attention_probs > att_threshold)
+            attention_probs = attention_probs * (attention_probs > att_threshold)
+            
 
         context_layer = torch.matmul(attention_probs, value_layer)
 
