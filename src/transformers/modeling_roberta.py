@@ -298,7 +298,7 @@ class RobertaForCausalLM(BertPreTrainedModel):
 
         return {"input_ids": input_ids, "attention_mask": attention_mask}
 
-
+# MARK: roberta model for mask lm
 @add_start_docstrings("""RoBERTa Model with a `language modeling` head on top. """, ROBERTA_START_DOCSTRING)
 class RobertaForMaskedLM(BertPreTrainedModel):
     config_class = RobertaConfig
@@ -342,6 +342,8 @@ class RobertaForMaskedLM(BertPreTrainedModel):
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
+        att_threshold=0.0,
+        hs_threshold=0.0,
         **kwargs
     ):
         r"""
@@ -374,6 +376,8 @@ class RobertaForMaskedLM(BertPreTrainedModel):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
+            att_threshold=att_threshold,
+            hs_threshold=hs_threshold,
         )
         sequence_output = outputs[0]
         prediction_scores = self.lm_head(sequence_output)
