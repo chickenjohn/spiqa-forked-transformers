@@ -602,7 +602,14 @@ class Pipeline(_ScikitCompat):
         Return:
             :obj:`Dict[str, torch.Tensor]`: The same as :obj:`inputs` but on the proper device.
         """
-        return {name: tensor.to(self.device) for name, tensor in inputs.items()}
+        ret = {}
+        for key in inputs.keys():
+            if isinstance(inputs[key], torch.Tensor):
+                ret[key] = inputs[key].to(self.device)
+            else:
+                ret[key] = inputs[key]
+
+        return ret
 
     def check_model_type(self, supported_models: Union[List[str], dict]):
         """
@@ -650,17 +657,19 @@ class Pipeline(_ScikitCompat):
             Numpy array
         """
         # Encode for forward
+        # MARK: return all parameters including attention and hs if requested.
+        # this change could break all pipelines based on Pipeline
         with self.device_placement():
             if self.framework == "tf":
                 # TODO trace model
-                predictions = self.model(inputs.data, training=False)[0]
+                predictions = self.model(inputs.data, training=False)
             else:
                 with torch.no_grad():
                     inputs = self.ensure_tensor_on_device(**inputs)
-                    predictions = self.model(**inputs)[0].cpu()
+                    predictions = self.model(**inputs)
 
         if return_tensors:
-            return predictions
+            return list(predictions)
         else:
             return predictions.numpy()
 
@@ -1149,6 +1158,11 @@ class FillMaskPipeline(Pipeline):
         args_parser: ArgumentHandler = None,
         device: int = -1,
         topk=5,
+        output_attentions=False,
+        output_hidden_states=False,
+        att_threshold = 0.0,
+        hs_threshold = 0.0,
+        head_mask = None,
         task: str = "",
     ):
         super().__init__(
@@ -1159,12 +1173,17 @@ class FillMaskPipeline(Pipeline):
             args_parser=args_parser,
             device=device,
             binary_output=True,
-            task=task,
+            task=task
         )
 
         self.check_model_type(TF_MODEL_WITH_LM_HEAD_MAPPING if self.framework == "tf" else MODEL_FOR_MASKED_LM_MAPPING)
 
         self.topk = topk
+        self.att_threshold = att_threshold
+        self.hs_threshold = hs_threshold
+        self.head_mask = head_mask
+        self.output_attentions=output_attentions
+        self.output_hidden_states=output_hidden_states
 
     def ensure_exactly_one_mask_token(self, masked_index: np.ndarray):
         numel = np.prod(masked_index.shape)
@@ -1180,7 +1199,7 @@ class FillMaskPipeline(Pipeline):
                 self.model.base_model_prefix,
                 f"No mask_token ({self.tokenizer.mask_token}) found on the input",
             )
-
+    # MARK: fill mask pipeline
     def __call__(self, *args, targets=None, **kwargs):
         """
         Fill the masked token in the text(s) given as inputs.
@@ -1203,10 +1222,30 @@ class FillMaskPipeline(Pipeline):
             - **token** (:obj:`str`) -- The predicted token (to replace the masked one).
         """
         inputs = self._parse_and_tokenize(*args, **kwargs)
+        inputs['att_threshold'] = self.att_threshold
+        inputs['hs_threshold'] = self.hs_threshold
+        inputs['head_mask'] = self.head_mask
+        inputs['output_attentions'] = self.output_attentions
+        inputs['output_hidden_states'] = self.output_hidden_states
         outputs = self._forward(inputs, return_tensors=True)
 
-        results = []
-        batch_size = outputs.shape[0] if self.framework == "tf" else outputs.size(0)
+        results = {}
+        results['result'] = []
+        
+        outputs[0] = outputs[0].to('cpu')
+        if self.output_hidden_states: outputs[1] = (i.to('cpu') for i in outputs[1])
+        if self.output_attentions: outputs[2] = (i.to('cpu') for i in outputs[2])
+
+        batch_size = outputs.shape[0][0] if self.framework == "tf" else outputs[0].size(0)
+        
+        # extract hidden states and attentions
+        attn_mask = (torch.sum(inputs['attention_mask'], dim=-1)).cpu().numpy()
+        def convert_hid_to_np(x): return np.asarray([layer.numpy() for layer in x])
+        def convert_att_to_np(x): 
+            temp, res = np.asarray([layer.numpy() for layer in x]), []
+            for i in range(temp.shape[1]):
+                res.append(np.squeeze(temp[:, i, :, :attn_mask[i], :attn_mask[i]]))
+            return res
 
         if targets is not None:
             if len(targets) == 0 or len(targets[0]) == 0:
@@ -1236,7 +1275,7 @@ class FillMaskPipeline(Pipeline):
                 # Fill mask pipeline supports only one ${mask_token} per sample
                 self.ensure_exactly_one_mask_token(masked_index)
 
-                logits = outputs[i, masked_index.item(), :]
+                logits = outputs[0][i, masked_index.item(), :]
                 probs = tf.nn.softmax(logits)
                 if targets is None:
                     topk = tf.math.top_k(probs, k=self.topk)
@@ -1252,7 +1291,7 @@ class FillMaskPipeline(Pipeline):
                 # Fill mask pipeline supports only one ${mask_token} per sample
                 self.ensure_exactly_one_mask_token(masked_index.numpy())
 
-                logits = outputs[i, masked_index.item(), :]
+                logits = outputs[0][i, masked_index.item(), :]
                 probs = logits.softmax(dim=0)
                 if targets is None:
                     values, predictions = probs.topk(self.topk)
@@ -1272,15 +1311,17 @@ class FillMaskPipeline(Pipeline):
                         "sequence": self.tokenizer.decode(tokens),
                         "score": v,
                         "token": p,
-                        "token_str": self.tokenizer.convert_ids_to_tokens(p),
+                        "token_str": self.tokenizer.convert_ids_to_tokens(p)
                     }
                 )
 
             # Append
-            results += [result]
-
-        if len(results) == 1:
-            return results[0]
+            results['result'] += [result]
+        
+        if self.output_hidden_states:
+            results['hidden_states'] = convert_hid_to_np(outputs[1])
+        if self.output_attentions:
+            results['attentions'] = convert_att_to_np(outputs[2])
         return results
 
 
