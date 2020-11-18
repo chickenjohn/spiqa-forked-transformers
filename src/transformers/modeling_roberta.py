@@ -460,6 +460,8 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
         labels=None,
         output_attentions=None,
         output_hidden_states=None,
+        att_threshold=0.0,
+        hs_threshold=0.0,
         return_dict=None,
     ):
         r"""
@@ -480,6 +482,8 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
             inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            att_threshold=att_threshold,
+            hs_threshold=hs_threshold,
             return_dict=return_dict,
         )
         sequence_output = outputs[0]
