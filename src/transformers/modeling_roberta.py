@@ -344,6 +344,7 @@ class RobertaForMaskedLM(BertPreTrainedModel):
         return_dict=None,
         att_threshold=0.0,
         hs_threshold=0.0,
+        quantize=0.0,
         **kwargs
     ):
         r"""
@@ -378,6 +379,7 @@ class RobertaForMaskedLM(BertPreTrainedModel):
             return_dict=return_dict,
             att_threshold=att_threshold,
             hs_threshold=hs_threshold,
+            quantize=quantize,
         )
         sequence_output = outputs[0]
         prediction_scores = self.lm_head(sequence_output)
@@ -462,6 +464,7 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
         output_hidden_states=None,
         att_threshold=0.0,
         hs_threshold=0.0,
+        quantize=0.0,
         return_dict=None,
     ):
         r"""
@@ -484,6 +487,7 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
             output_hidden_states=output_hidden_states,
             att_threshold=att_threshold,
             hs_threshold=hs_threshold,
+            quantize=quantize,
             return_dict=return_dict,
         )
         sequence_output = outputs[0]
@@ -749,7 +753,8 @@ class RobertaForQuestionAnswering(BertPreTrainedModel):
         output_hidden_states=None,
         return_dict=None,
         att_threshold=0.0,
-        hs_threshold=0.0
+        hs_threshold=0.0, 
+        quantize=0.0
     ):
         r"""
         start_positions (:obj:`torch.LongTensor` of shape :obj:`(batch_size,)`, `optional`):
@@ -774,7 +779,8 @@ class RobertaForQuestionAnswering(BertPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             att_threshold=att_threshold,
-            hs_threshold=hs_threshold
+            hs_threshold=hs_threshold,
+            quantize=quantize
         )
 
         sequence_output = outputs[0]

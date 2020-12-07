@@ -1704,6 +1704,7 @@ class QuestionAnsweringPipeline(Pipeline):
         kwargs.setdefault("handle_impossible_answer", False)
         kwargs.setdefault("att_threshold", 0.0)
         kwargs.setdefault("hs_threshold", 0.0)
+        kwargs.setdefault("quantize", 0.0)
         kwargs.setdefault("head_mask", None)
 
         if kwargs["topk"] < 1:
@@ -1746,6 +1747,7 @@ class QuestionAnsweringPipeline(Pipeline):
                             fw_args["head_mask"] = torch.tensor(kwargs["head_mask"], device=self.device)
                         fw_args["att_threshold"] = kwargs["att_threshold"]
                         fw_args["hs_threshold"] = kwargs["hs_threshold"]
+                        fw_args["quantize"] = kwargs["quantize"]
                         fw_args["output_attentions"] = True
                         fw_args["output_hidden_states"] = True
                         attn_mask = (torch.sum(fw_args['attention_mask'], dim=-1)).cpu().numpy()
