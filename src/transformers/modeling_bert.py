@@ -238,8 +238,9 @@ class BertSelfAttention(nn.Module):
         x = x.view(*new_x_shape)
         return x.permute(0, 2, 1, 3)
 
-    def quantize_attention(self, att, base):
+    def quantize_attention(self, att, bits):
         with torch.no_grad():
+            base = 1.0 / (2**int(bits))
             return torch.floor(att / base + 0.5) * base
 
     def forward(
