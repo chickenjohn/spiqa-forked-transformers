@@ -243,13 +243,25 @@ class BertSelfAttention(nn.Module):
             base = 1.0 / (2**int(bits))
             return torch.floor(att / base + 0.5) * base
     
-    def  quantize_attention_log(self, att, bits):
+    def quantize_attention_log(self, att, bits):
         with torch.no_grad():
             exp = torch.floor(torch.log2(att) + 0.5)
             min_exp = -(2.0**bits-1)
             clamped_exp = exp.clone()
             clamped_exp[exp < min_exp] = min_exp
             return torch.pow(2.0, clamped_exp)
+
+    def quantize_attention_lut(self, att, bits):
+        lut = list(range(-14, 2, 2))
+        with torch.no_grad():
+            exp = torch.log2(att)
+            clamped_exp = exp.clone()
+            clamped_exp[exp < lut[0]] = lut[0]
+            exp = exp + 1
+            for log_flr, log_ceil in zip(lut, lut[1:] + [2]):
+                clamped_exp[(exp >= log_flr) & (exp < log_ceil)] = log_flr
+        
+        return torch.pow(2.0, clamped_exp)
 
     def forward(
         self,
@@ -322,7 +334,7 @@ class BertSelfAttention(nn.Module):
             attention_probs = attention_probs * (attention_probs > att_threshold)
             
         if quantize > 0.0:
-            attention_probs = self.quantize_attention_log(attention_probs, quantize)
+            attention_probs = self.quantize_attention_lut(attention_probs, quantize)
 
         context_layer = torch.matmul(attention_probs, value_layer)
 
