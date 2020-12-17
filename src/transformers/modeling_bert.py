@@ -252,9 +252,10 @@ class BertSelfAttention(nn.Module):
             return torch.pow(2.0, clamped_exp)
 
     def quantize_attention_lut(self, att, bits):
+        import numpy as np
         min_exp = -16.0
         step = -min_exp / 2.0**bits
-        lut = list(np.arange(min_exp, step, step)[1:0])
+        lut = list(np.arange(min_exp, step, step)[1:])
         with torch.no_grad():
             exp = torch.log2(att)
             clamped_exp = exp.clone()
