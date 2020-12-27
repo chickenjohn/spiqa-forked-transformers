@@ -30,6 +30,7 @@ class BaseModelOutput(ModelOutput):
     last_hidden_state: torch.FloatTensor
     hidden_states: Optional[Tuple[torch.FloatTensor]] = None
     attentions: Optional[Tuple[torch.FloatTensor]] = None
+    pipeline_probes: Optional[Tuple[torch.FloatTensor]] = None
 
 
 @dataclass
@@ -497,6 +498,7 @@ class QuestionAnsweringModelOutput(ModelOutput):
     end_logits: torch.FloatTensor = None
     hidden_states: Optional[Tuple[torch.FloatTensor]] = None
     attentions: Optional[Tuple[torch.FloatTensor]] = None
+    pipeline_probes: Optional[Tuple[torch.FloatTensor]] = None
 
 
 @dataclass

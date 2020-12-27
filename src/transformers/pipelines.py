@@ -1750,17 +1750,36 @@ class QuestionAnsweringPipeline(Pipeline):
                         fw_args["quantize"] = kwargs["quantize"]
                         fw_args["output_attentions"] = True
                         fw_args["output_hidden_states"] = True
+                        fw_args["output_pipeline_prbs"] = True
                         attn_mask = (torch.sum(fw_args['attention_mask'], dim=-1)).cpu().numpy()
-                        start, end, hidden_states, attentions = self.model(**fw_args)
+                        start, end, hidden_states, attentions, pipeline_prbs = self.model(**fw_args)
                         def convert_hid_to_np(x): return np.asarray([layer.cpu().numpy() for layer in x])
                         def convert_att_to_np(x): 
                             temp, res = np.asarray([layer.cpu().numpy() for layer in x]), []
                             for i in range(temp.shape[1]):
                                 res.append(np.squeeze(temp[:, i, :, :, :attn_mask[i]]))
                             return res
+                        def convert_prbs_to_np(x):
+                            q_prbs_temp, k_prbs_temp, v_prbs_temp, scrs_temp = [], [], [], []
+                            for i_layer in x:
+                                q_prbs_temp.append(i_layer[0].cpu().numpy())
+                                k_prbs_temp.append(i_layer[1].cpu().numpy())
+                                v_prbs_temp.append(i_layer[2].cpu().numpy())
+                                scrs_temp.append(i_layer[3].cpu().numpy())
+                            
+                            num_inst = q_prbs_temp[0].shape[0]
+                            q_prbs, k_prbs, v_prbs, scrs = [], [], [], []
+                            for i in range(num_inst):
+                                q_prbs.append(np.squeeze(np.stack(q_prbs_temp, axis=0)[:, i, :, :attn_mask[i], :]))
+                                k_prbs.append(np.squeeze(np.stack(k_prbs_temp, axis=0)[:, i, :, :attn_mask[i], :]))
+                                v_prbs.append(np.squeeze(np.stack(v_prbs_temp, axis=0)[:, i, :, :attn_mask[i], :]))
+                                scrs.append(np.squeeze(np.stack(scrs_temp, axis=0)[:, i, :, :attn_mask[i], :attn_mask[i]]))
+                            return(q_prbs, k_prbs, v_prbs, scrs)
+
                         start, end = start.cpu().numpy(), end.cpu().numpy()
                         hidden_states, attentions = \
                             convert_hid_to_np(hidden_states), convert_att_to_np(attentions)
+                        pipeline_prbs = convert_prbs_to_np(pipeline_prbs)
 
             min_null_score = 1000000  # large and positive
             answers = []
@@ -1796,6 +1815,7 @@ class QuestionAnsweringPipeline(Pipeline):
                         "end": np.where(char_to_word == feature.token_to_orig_map[e])[0][-1].item(),
                         "hidden_states": hidden_states,
                         "attentions": attentions,
+                        "pipeline_prbs": pipeline_prbs,
                         "answer": " ".join(
                             example.doc_tokens[feature.token_to_orig_map[s] : feature.token_to_orig_map[e] + 1]
                         ),

@@ -296,6 +296,9 @@ class BertSelfAttention(nn.Module):
         key_layer = self.transpose_for_scores(mixed_key_layer)
         value_layer = self.transpose_for_scores(mixed_value_layer)
 
+        # store q, k, v results to return for mha pipeline analysis
+        qkv_res = (query_layer, key_layer, value_layer)
+
         # Take the dot product between "query" and "key" to get the raw attention scores.
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
@@ -347,7 +350,8 @@ class BertSelfAttention(nn.Module):
         context_layer = context_layer.view(*new_context_layer_shape)
 
         outputs = (context_layer, attention_probs) if output_attentions else (context_layer,)
-        return outputs
+        pipeline_probes = qkv_res + (attention_scores,)
+        return outputs, pipeline_probes
 
 
 class BertSelfOutput(nn.Module):
@@ -400,7 +404,7 @@ class BertAttention(nn.Module):
         att_threshold=0.0,
         quantize=0.0
     ):
-        self_outputs = self.self(
+        self_outputs, pipeline_probes = self.self(
             hidden_states,
             attention_mask,
             head_mask,
@@ -410,10 +414,11 @@ class BertAttention(nn.Module):
             att_threshold,
             quantize
         )
-        #self_outputs[0]: context; self_outputs[1:]: attentions
+        # self_outputs[0]: context; self_outputs[1:]: attentions
+        # pipeline_probes: (q, k, v, attention_scores)
         attention_output = self.output(self_outputs[0], hidden_states)
         outputs = (attention_output,) + self_outputs[1:]  # add attentions if we output them
-        return outputs
+        return outputs, pipeline_probes
 
 
 class BertIntermediate(nn.Module):
@@ -471,7 +476,7 @@ class BertLayer(nn.Module):
         hs_threshold=0.0,
         quantize=0.0
     ):
-        self_attention_outputs = self.attention(
+        self_attention_outputs, pipeline_probes = self.attention(
             hidden_states,
             attention_mask,
             head_mask,
@@ -505,7 +510,7 @@ class BertLayer(nn.Module):
             layer_output = layer_output_mask * layer_output
 
         outputs = (layer_output,) + outputs
-        return outputs
+        return outputs, pipeline_probes
 
     def feed_forward_chunk(self, attention_output):
         intermediate_output = self.intermediate(attention_output)
@@ -528,6 +533,7 @@ class BertEncoder(nn.Module):
         encoder_attention_mask=None,
         output_attentions=False,
         output_hidden_states=False,
+        output_pipeline_prbs=False,
         return_dict=False,
         att_threshold=0.0,
         hs_threshold=0.0,
@@ -535,6 +541,7 @@ class BertEncoder(nn.Module):
     ):
         all_hidden_states = () if output_hidden_states else None
         all_attentions = () if output_attentions else None
+        all_pipeline_probes = () if output_pipeline_prbs else None
         for i, layer_module in enumerate(self.layer):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
@@ -556,7 +563,7 @@ class BertEncoder(nn.Module):
                     encoder_attention_mask,
                 )
             else:
-                layer_outputs = layer_module(
+                layer_outputs, pipeline_probes = layer_module(
                     hidden_states,
                     attention_mask,
                     head_mask[i],
@@ -570,14 +577,16 @@ class BertEncoder(nn.Module):
             hidden_states = layer_outputs[0]
             if output_attentions:
                 all_attentions = all_attentions + (layer_outputs[1],)
+            if output_pipeline_prbs:
+                all_pipeline_probes = all_pipeline_probes + (pipeline_probes,)
 
         if output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_states,)
 
         if not return_dict:
-            return tuple(v for v in [hidden_states, all_hidden_states, all_attentions] if v is not None)
+            return tuple(v for v in [hidden_states, all_hidden_states, all_attentions, all_pipeline_probes] if v is not None)
         return BaseModelOutput(
-            last_hidden_state=hidden_states, hidden_states=all_hidden_states, attentions=all_attentions
+            last_hidden_state=hidden_states, hidden_states=all_hidden_states, attentions=all_attentions, pipeline_probes=all_pipeline_probes,
         )
 
 
@@ -843,6 +852,7 @@ class BertModel(BertPreTrainedModel):
         encoder_attention_mask=None,
         output_attentions=None,
         output_hidden_states=None,
+        output_pipeline_prbs=None,
         return_dict=None,
         att_threshold=0.0,
         hs_threshold=0.0,
@@ -913,6 +923,7 @@ class BertModel(BertPreTrainedModel):
             encoder_attention_mask=encoder_extended_attention_mask,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            output_pipeline_prbs=output_pipeline_prbs,
             return_dict=return_dict,
             att_threshold=att_threshold,
             hs_threshold=hs_threshold,
