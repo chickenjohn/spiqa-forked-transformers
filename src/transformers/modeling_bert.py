@@ -340,17 +340,20 @@ class BertSelfAttention(nn.Module):
             attention_probs = attention_probs * (attention_probs > att_threshold)
             
         if quantize > 0.0:
-            attention_probs = self.quantize_attention_log(attention_probs, quantize)
+            attention_probs = self.quantize_attention_lut(attention_probs, quantize)
 
+        # context layer size: (instance, head, seq_len, 64)
         context_layer = torch.matmul(attention_probs, value_layer)
+        att_out_probs = context_layer.detach().clone()
 
+        # transpose to (instance, seq_len, head, 64)
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         # context shape: (instances, seq_len, 768)
         context_layer = context_layer.view(*new_context_layer_shape)
 
         outputs = (context_layer, attention_probs) if output_attentions else (context_layer,)
-        pipeline_probes = qkv_res + (attention_scores,)
+        pipeline_probes = qkv_res + (attention_scores, att_out_probs, )
         return outputs, pipeline_probes
 
 
@@ -463,6 +466,20 @@ class BertLayer(nn.Module):
             self.crossattention = BertAttention(config)
         self.intermediate = BertIntermediate(config)
         self.output = BertOutput(config)
+    
+    # MARK: hidden states quantization
+    def quantize_hstates_linear(self, inputs, bits):
+        import numpy as np
+        effective_range = (0, 25.0 + 15.0)
+        quant_step = (effective_range[1]-effective_range[0]) / 2.0**bits
+        lut = np.arange(effective_range[0], effective_range[1], quant_step)
+        with torch.no_grad():
+            temp_inputs = inputs + 15.0
+            temp_inputs = temp_inputs / quant_step
+            temp_inputs = torch.floor(temp_inputs + 0.5) * quant_step
+            temp_inputs = temp_inputs - 15.0
+
+        return temp_inputs
 
     def forward(
         self,
@@ -474,15 +491,19 @@ class BertLayer(nn.Module):
         output_attentions=False,
         att_threshold=0.0,
         hs_threshold=0.0,
-        quantize=0.0
+        quantize_att_bits=0.0,
+        quantize_hstate_bits=0.0
     ):
+        if quantize_hstate_bits > 0.0:
+            hidden_states = self.quantize_hstates_linear(hidden_states, quantize_hstate_bits)
+
         self_attention_outputs, pipeline_probes = self.attention(
             hidden_states,
             attention_mask,
             head_mask,
             output_attentions=output_attentions,
             att_threshold=att_threshold,
-            quantize=quantize
+            quantize=quantize_att_bits
         )
         attention_output = self_attention_outputs[0]
         outputs = self_attention_outputs[1:]  # add self attentions if we output attention weights
@@ -537,7 +558,8 @@ class BertEncoder(nn.Module):
         return_dict=False,
         att_threshold=0.0,
         hs_threshold=0.0,
-        quantize=0.0
+        quantize_att_bits=0.0,
+        quantize_hstate_bits=0.0
     ):
         all_hidden_states = () if output_hidden_states else None
         all_attentions = () if output_attentions else None
@@ -572,7 +594,8 @@ class BertEncoder(nn.Module):
                     output_attentions,
                     att_threshold,
                     hs_threshold,
-                    quantize
+                    quantize_att_bits,
+                    quantize_hstate_bits
                 )
             hidden_states = layer_outputs[0]
             if output_attentions:
@@ -856,7 +879,8 @@ class BertModel(BertPreTrainedModel):
         return_dict=None,
         att_threshold=0.0,
         hs_threshold=0.0,
-        quantize=0.0
+        quantize_att_bits=0.0,
+        quantize_hstate_bits=0.0
     ):
         r"""
         encoder_hidden_states  (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, hidden_size)`, `optional`):
@@ -927,7 +951,8 @@ class BertModel(BertPreTrainedModel):
             return_dict=return_dict,
             att_threshold=att_threshold,
             hs_threshold=hs_threshold,
-            quantize=quantize
+            quantize_att_bits=quantize_att_bits,
+            quantize_hstate_bits=quantize_hstate_bits
         )
         sequence_output = encoder_outputs[0]
         pooled_output = self.pooler(sequence_output)

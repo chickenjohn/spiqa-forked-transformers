@@ -1704,7 +1704,8 @@ class QuestionAnsweringPipeline(Pipeline):
         kwargs.setdefault("handle_impossible_answer", False)
         kwargs.setdefault("att_threshold", 0.0)
         kwargs.setdefault("hs_threshold", 0.0)
-        kwargs.setdefault("quantize", 0.0)
+        kwargs.setdefault("quantize_att_bits", 0.0)
+        kwargs.setdefault("quantize_hstate_bits", 0.0)
         kwargs.setdefault("head_mask", None)
 
         if kwargs["topk"] < 1:
@@ -1747,7 +1748,8 @@ class QuestionAnsweringPipeline(Pipeline):
                             fw_args["head_mask"] = torch.tensor(kwargs["head_mask"], device=self.device)
                         fw_args["att_threshold"] = kwargs["att_threshold"]
                         fw_args["hs_threshold"] = kwargs["hs_threshold"]
-                        fw_args["quantize"] = kwargs["quantize"]
+                        fw_args["quantize_att_bits"] = kwargs["quantize_att_bits"]
+                        fw_args["quantize_hstate_bits"] = kwargs["quantize_hstate_bits"]
                         fw_args["output_attentions"] = True
                         fw_args["output_hidden_states"] = True
                         fw_args["output_pipeline_prbs"] = True
@@ -1760,21 +1762,23 @@ class QuestionAnsweringPipeline(Pipeline):
                                 res.append(np.squeeze(temp[:, i, :, :, :attn_mask[i]]))
                             return res
                         def convert_prbs_to_np(x):
-                            q_prbs_temp, k_prbs_temp, v_prbs_temp, scrs_temp = [], [], [], []
+                            q_prbs_temp, k_prbs_temp, v_prbs_temp, scrs_temp, att_out_temp = [], [], [], [], []
                             for i_layer in x:
                                 q_prbs_temp.append(i_layer[0].cpu().numpy())
                                 k_prbs_temp.append(i_layer[1].cpu().numpy())
                                 v_prbs_temp.append(i_layer[2].cpu().numpy())
                                 scrs_temp.append(i_layer[3].cpu().numpy())
+                                att_out_temp.append(i_layer[4].cpu().numpy())
                             
                             num_inst = q_prbs_temp[0].shape[0]
-                            q_prbs, k_prbs, v_prbs, scrs = [], [], [], []
+                            q_prbs, k_prbs, v_prbs, scrs, att_out = [], [], [], [], []
                             for i in range(num_inst):
                                 q_prbs.append(np.squeeze(np.stack(q_prbs_temp, axis=0)[:, i, :, :attn_mask[i], :]))
                                 k_prbs.append(np.squeeze(np.stack(k_prbs_temp, axis=0)[:, i, :, :attn_mask[i], :]))
                                 v_prbs.append(np.squeeze(np.stack(v_prbs_temp, axis=0)[:, i, :, :attn_mask[i], :]))
                                 scrs.append(np.squeeze(np.stack(scrs_temp, axis=0)[:, i, :, :attn_mask[i], :attn_mask[i]]))
-                            return(q_prbs, k_prbs, v_prbs, scrs)
+                                att_out.append(np.squeeze(np.stack(att_out_temp, axis=0)[:, i, :, :attn_mask[i], :]))
+                            return(q_prbs, k_prbs, v_prbs, scrs, att_out)
 
                         start, end = start.cpu().numpy(), end.cpu().numpy()
                         hidden_states, attentions = \
