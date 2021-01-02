@@ -481,6 +481,26 @@ class BertLayer(nn.Module):
 
         return temp_inputs
 
+    def quantize_hstates_log(self, inputs, bits):
+        # reserve one bit for sign
+        effi_bits = bits - 1
+        frac_ubound, frac_lbound = 4.0, -5.0
+        quant_log_step = (frac_ubound-frac_lbound) / (2.0**effi_bits-1.0)
+        with torch.no_grad():
+            signs = torch.ones(inputs.shape)
+            signs[inputs < 0.0] = -1.0
+            exp = torch.abs(inputs.clone())
+            exp[inputs == 0.0] = 10**-10
+            exp = torch.floor(torch.log2(exp) / quant_log_step + 0.5) * quant_log_step
+            clamped_exp = exp.clone()
+            clamped_exp[exp <= frac_lbound] = float("-Inf")
+            clamped_exp[exp > frac_ubound] = frac_ubound
+        
+        if signs.get_device() != clamped_exp.get_device():
+            signs = signs.to(clamped_exp.get_device())
+        return torch.pow(2.0, clamped_exp) * signs
+    
+
     def forward(
         self,
         hidden_states,
@@ -495,7 +515,7 @@ class BertLayer(nn.Module):
         quantize_hstate_bits=0.0
     ):
         if quantize_hstate_bits > 0.0:
-            hidden_states = self.quantize_hstates_linear(hidden_states, quantize_hstate_bits)
+            hidden_states = self.quantize_hstates_log(hidden_states, quantize_hstate_bits)
 
         self_attention_outputs, pipeline_probes = self.attention(
             hidden_states,
