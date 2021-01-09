@@ -261,6 +261,32 @@ class BertSelfAttention(nn.Module):
         
         return torch.pow(2.0, clamped_exp)
 
+    def quantize_attention_ranking(self, att, bits):
+        min_val = 1e-3
+        # fixed ranking position, from histogram observation
+        fixed_ranking_map = [1e-2, 1e-1, 1]
+        with torch.no_grad():
+            zero_masks = torch.ones(att.shape).to(att.get_device())
+            zero_masks[att<min_val] = 0.0
+            quant_att = torch.zeros(att.shape).to(att.get_device())
+            for thres in fixed_ranking_map:
+                quant_att[att <= thres] += 1
+            for i in range(len(fixed_ranking_map)):
+                quant_att[quant_att == (len(fixed_ranking_map) - i)] = fixed_ranking_map[i]
+            quant_att = quant_att * zero_masks
+
+        return quant_att
+
+    
+    def quantize_attention_binarization(self, att):
+        thres = 1e-2
+        with torch.no_grad():
+            res_att = att.clone().to(att.get_device())
+            res_att[att < thres] = 0.0
+            res_att[att >= thres] = 1.0
+
+        return res_att
+
     def forward(
         self,
         hidden_states,
@@ -335,7 +361,7 @@ class BertSelfAttention(nn.Module):
             attention_probs = attention_probs * (attention_probs > att_threshold)
             
         if quantize > 0.0:
-            attention_probs = self.quantize_attention_lut(attention_probs, quantize)
+            attention_probs = self.quantize_attention_binarization(attention_probs, quantize)
 
         # context layer size: (instance, head, seq_len, 64)
         context_layer = torch.matmul(attention_probs, value_layer)
