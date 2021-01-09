@@ -278,7 +278,7 @@ class BertSelfAttention(nn.Module):
         return quant_att
 
     
-    def quantize_attention_binarization(self, att):
+    def quantize_attention_binarization(self, att, bits):
         thres = 1e-2
         with torch.no_grad():
             res_att = att.clone().to(att.get_device())
