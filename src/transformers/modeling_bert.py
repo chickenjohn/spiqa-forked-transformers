@@ -240,7 +240,7 @@ class BertSelfAttention(nn.Module):
 
     def quantize_attention(self, att, bits):
         with torch.no_grad():
-            base = 1.0 / (2**int(bits))
+            base = 1.0 / (2**int(bits)-1)
             return torch.floor(att / base + 0.5) * base
     
     def quantize_attention_log(self, att, bits):
@@ -252,12 +252,12 @@ class BertSelfAttention(nn.Module):
             return torch.pow(2.0, clamped_exp)
 
     def quantize_attention_lut(self, att, bits):
-        min_exp = -9.9
-        step = min_exp / 2.0**bits
+        min_exp = math.log2(1e-3)
+        step = min_exp / (2.0**bits-1)
         with torch.no_grad():
             exp = torch.log2(att)
             clamped_exp = torch.floor(exp / step + 0.5) * step
-            clamped_exp[exp < min_exp] = float("-Inf")
+            clamped_exp[exp < (min_exp - step)] = float("-Inf")
         
         return torch.pow(2.0, clamped_exp)
 
