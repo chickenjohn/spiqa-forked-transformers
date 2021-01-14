@@ -262,17 +262,38 @@ class BertSelfAttention(nn.Module):
         return torch.pow(2.0, clamped_exp)
 
     def quantize_attention_ranking(self, att, bits):
+        import numpy as np
+        from math import log
         min_val = 1e-3
+        def ranking_search(row):
+            num_ranks = int(2.0**bits - 1)
+            thresholds = [1.0 / num_ranks * i for i in range(1, num_ranks)]
+            return [np.argmax(row > threshold) for threshold in thresholds] 
+
+        # get fixed ranking position using numpy
+        hist_x_start, hist_x_end = log(min_val, 10), log(1, 10)
+        bin_edges = 10**np.linspace(hist_x_start, hist_x_end, 100+1)
+        atts_np = np.apply_along_axis(
+                lambda x: np.histogram(x, bin_edges, range=(min_val, 1.0))[0], -1,  att.to('cpu').numpy())
+        atts_np = np.cumsum(np.apply_along_axis(lambda a: a / np.sum(a) if np.sum(a) > 0 else a, -1, atts_np), axis=-1)
+        rank_idx = np.apply_along_axis(ranking_search, -1, atts_np)
+        ranking_map = np.apply_along_axis(lambda x: bin_edges[x], -1, rank_idx)
+        value_clamp_to = np.apply_along_axis(lambda x: bin_edges[x-1], -1, rank_idx)
+
         # fixed ranking position, from histogram observation
-        fixed_ranking_map = [1e-2, 1e-1, 1]
         with torch.no_grad():
-            zero_masks = torch.ones(att.shape).to(att.get_device())
+            zero_masks, compare_done_mask = torch.ones(att.shape).to(att.get_device()), torch.ones(att.shape).to(att.get_device())
             zero_masks[att<min_val] = 0.0
             quant_att = torch.zeros(att.shape).to(att.get_device())
-            for thres in fixed_ranking_map:
-                quant_att[att <= thres] += 1
-            for i in range(len(fixed_ranking_map)):
-                quant_att[quant_att == (len(fixed_ranking_map) - i)] = fixed_ranking_map[i]
+            for thres, val in zip(np.split(ranking_map, ranking_map.shape[-1], axis=-1), np.split(value_clamp_to, value_clamp_to.shape[-1], axis=-1)):
+                ranking_map_stacked = torch.Tensor(np.concatenate([thres]*quant_att.shape[-1], axis=-1))
+                ranking_map_stacked = ranking_map_stacked.to(att.get_device())
+                val_stacked = torch.Tensor(np.concatenate([val]*quant_att.shape[-1], axis=-1))
+                val_stacked = val_stacked.to(att.get_device())
+                quant_att += (att < ranking_map_stacked) * val_stacked * compare_done_mask
+                compare_done_mask = att >= ranking_map_stacked
+
+            quant_att += (att < 1.0) * 1.0 * compare_done_mask
             quant_att = quant_att * zero_masks
 
         return quant_att
@@ -361,7 +382,7 @@ class BertSelfAttention(nn.Module):
             attention_probs = attention_probs * (attention_probs > att_threshold)
             
         if quantize > 0.0:
-            attention_probs = self.quantize_attention_binarization(attention_probs, quantize)
+            attention_probs = self.quantize_attention_ranking(attention_probs, quantize)
 
         # context layer size: (instance, head, seq_len, 64)
         context_layer = torch.matmul(attention_probs, value_layer)
