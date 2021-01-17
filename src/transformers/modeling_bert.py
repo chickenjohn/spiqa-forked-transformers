@@ -261,7 +261,40 @@ class BertSelfAttention(nn.Module):
         
         return torch.pow(2.0, clamped_exp)
 
-    def quantize_attention_ranking(self, att, bits):
+
+    def quantize_attention_ranking_head(self, att, bits):
+        import numpy as np
+        from math import log
+        min_val = 1e-3
+        def ranking_search(row):
+            num_ranks = int(2.0**bits - 1)
+            thresholds = [1.0 / num_ranks * i for i in range(1, num_ranks)]
+            return [np.argmax(row > threshold) for threshold in thresholds] 
+
+        # get fixed ranking position using numpy
+        hist_x_start, hist_x_end = log(min_val, 10), log(1, 10)
+        bin_edges = 10**np.linspace(hist_x_start, hist_x_end, 100+1)
+        atts_np = np.histogram(att.to('cpu').numpy().flatten(), bin_edges, range=(min_val, 1.0))[0]
+        atts_np = np.cumsum(atts_np / np.sum(atts_np))
+        rank_idx = ranking_search(atts_np)
+        ranking_map = bin_edges[rank_idx]
+        value_clamp_to = [(start+end)/2.0 for start, end in zip([min_val] + list(ranking_map[:-1]), ranking_map)]
+
+        # fixed ranking position based on histogram
+        with torch.no_grad(): 
+            zero_masks, compare_done_mask = torch.ones(att.shape).to(att.get_device()), torch.ones(att.shape).to(att.get_device())
+            zero_masks[att<min_val] = 0.0
+            quant_att = torch.zeros(att.shape).to(att.get_device())
+            for thres, val in zip(ranking_map, value_clamp_to):
+                quant_att += (att < thres) * val * compare_done_mask
+                compare_done_mask = att >= thres
+
+            quant_att += (att < 1.0) * 1.0 * compare_done_mask
+            quant_att = quant_att * zero_masks
+
+        return quant_att
+
+    def quantize_attention_ranking_token(self, att, bits):
         import numpy as np
         from math import log
         min_val = 1e-3
@@ -382,7 +415,7 @@ class BertSelfAttention(nn.Module):
             attention_probs = attention_probs * (attention_probs > att_threshold)
             
         if quantize > 0.0:
-            attention_probs = self.quantize_attention_ranking(attention_probs, quantize)
+            attention_probs = self.quantize_attention_ranking_head(attention_probs, quantize)
 
         # context layer size: (instance, head, seq_len, 64)
         context_layer = torch.matmul(attention_probs, value_layer)
@@ -575,6 +608,7 @@ class BertLayer(nn.Module):
         quantize_att_bits=0.0,
         quantize_hstate_bits=0.0
     ):
+        # MARK: hidden states quantization for eacy layer
         if quantize_hstate_bits > 0.0:
             hidden_states = self.quantize_hstates_fixed(hidden_states, quantize_hstate_bits, int_bits=5.0)
 
