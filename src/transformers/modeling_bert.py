@@ -341,6 +341,30 @@ class BertSelfAttention(nn.Module):
 
         return res_att
 
+    def quantize_attention_bin_majority(self, att, thres):
+        import numpy as np
+        from math import log
+        def majority_search(row):
+            sorted_row = np.sort(row)[::-1]
+            sum_sorted_row = np.cumsum(sorted_row)
+            idx_to_majority = np.argmax(sum_sorted_row > thres)
+            major_elems = sorted_row[idx_to_majority]
+            if sum_sorted_row[-1] == 0.0:
+                return 0.0, 0.0
+            else:
+                return major_elems, thres/float(major_elems)
+
+        atts_np = np.apply_along_axis(majority_search, -1, att.to('cpu').numpy())
+        atts_major_elems, atts_max_val = torch.Tensor(np.concatenate([atts_np[:,:,:,0,np.newaxis]]*att.shape[-1], axis=-1)), \
+                                                torch.Tensor(np.concatenate([atts_np[:,:,:,1,np.newaxis]]*att.shape[-1], axis=-1))
+        with torch.no_grad():
+            atts_major_elems = atts_major_elems.to(att.get_device())
+            atts_max_val = atts_max_val.to(att.get_device())
+            quant_att = torch.zeros(att.shape).to(att.get_device())
+            quant_att += (att >= atts_major_elems) * atts_max_val
+
+        return quant_att
+
     def forward(
         self,
         hidden_states,
@@ -415,7 +439,7 @@ class BertSelfAttention(nn.Module):
             attention_probs = attention_probs * (attention_probs > att_threshold)
             
         if quantize > 0.0:
-            attention_probs = self.quantize_attention_ranking_head(attention_probs, quantize)
+            attention_probs = self.quantize_attention_bin_majority(attention_probs, quantize)
 
         # context layer size: (instance, head, seq_len, 64)
         context_layer = torch.matmul(attention_probs, value_layer)
