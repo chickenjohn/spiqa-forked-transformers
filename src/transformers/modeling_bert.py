@@ -1827,10 +1827,12 @@ class BertForQuestionAnswering(BertPreTrainedModel):
         end_positions=None,
         output_attentions=None,
         output_hidden_states=None,
+        output_pipeline_prbs=None,
         return_dict=None,
         att_threshold=0.0,
         hs_threshold=0.0,
-        quantize=0.0
+        quantize_att_bits=0.0,
+        quantize_hstate_bits=0.0
     ):
         r"""
         start_positions (:obj:`torch.LongTensor` of shape :obj:`(batch_size,)`, `optional`):
@@ -1853,10 +1855,12 @@ class BertForQuestionAnswering(BertPreTrainedModel):
             inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            output_pipeline_prbs=output_pipeline_prbs,
             return_dict=return_dict,
             att_threshold=att_threshold,
             hs_threshold=hs_threshold,
-            quantize=quantize
+            quantize_att_bits=quantize_att_bits,
+            quantize_hstate_bits=quantize_hstate_bits
         )
 
         sequence_output = outputs[0]
@@ -1893,4 +1897,5 @@ class BertForQuestionAnswering(BertPreTrainedModel):
             end_logits=end_logits,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
+            pipeline_probes=outputs.pipeline_probes
         )
