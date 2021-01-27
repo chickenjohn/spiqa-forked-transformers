@@ -341,10 +341,12 @@ class RobertaForMaskedLM(BertPreTrainedModel):
         labels=None,
         output_attentions=None,
         output_hidden_states=None,
+        output_pipeline_prbs=None,
         return_dict=None,
         att_threshold=0.0,
-        hs_threshold=0.0,
-        quantize=0.0,
+        hs_threshold=0.0,, 
+        quantize_att_bits=0.0,
+        quantize_hstate_bits=0.0,
         **kwargs
     ):
         r"""
@@ -376,10 +378,12 @@ class RobertaForMaskedLM(BertPreTrainedModel):
             encoder_attention_mask=encoder_attention_mask,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            output_pipeline_prbs=output_pipeline_prbs,
             return_dict=return_dict,
             att_threshold=att_threshold,
             hs_threshold=hs_threshold,
-            quantize=quantize,
+            quantize_att_bits=quantize_att_bits,
+            quantize_hstate_bits=quantize_hstate_bits,
         )
         sequence_output = outputs[0]
         prediction_scores = self.lm_head(sequence_output)
@@ -393,6 +397,7 @@ class RobertaForMaskedLM(BertPreTrainedModel):
             output = (prediction_scores,) + outputs[2:]
             return ((masked_lm_loss,) + output) if masked_lm_loss is not None else output
 
+        # MARK: return probes to be fixed
         return MaskedLMOutput(
             loss=masked_lm_loss,
             logits=prediction_scores,
@@ -462,9 +467,11 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
         labels=None,
         output_attentions=None,
         output_hidden_states=None,
+        output_pipeline_prbs=None,
         att_threshold=0.0,
         hs_threshold=0.0,
-        quantize=0.0,
+        quantize_att_bits=0.0,
+        quantize_hstate_bits=0.0,
         return_dict=None,
     ):
         r"""
@@ -485,9 +492,11 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
             inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            output_pipeline_prbs=output_pipeline_prbs,
             att_threshold=att_threshold,
             hs_threshold=hs_threshold,
-            quantize=quantize,
+            quantize_att_bits=quantize_att_bits,
+            quantize_hstate_bits=quantize_hstate_bits,
             return_dict=return_dict,
         )
         sequence_output = outputs[0]
@@ -507,11 +516,12 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
             output = (logits,) + outputs[2:]
             return ((loss,) + output) if loss is not None else output
 
+        # MARK: return probes to be fixed
         return SequenceClassifierOutput(
             loss=loss,
             logits=logits,
             hidden_states=outputs.hidden_states,
-            attentions=outputs.attentions,
+            attentions=outputs.attentions
         )
 
 
