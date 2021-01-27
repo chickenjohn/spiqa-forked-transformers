@@ -242,6 +242,14 @@ class BertSelfAttention(nn.Module):
         with torch.no_grad():
             base = 1.0 / (2**int(bits)-1)
             return torch.floor(att / base + 0.5) * base
+
+    def quantize_attention_clamped(self, att, bits):
+        min_val = 1e-3
+        with torch.no_grad():
+            base = (1.0 - min_val) / (2**int(bits)-1)
+            res = torch.floor((att - min_val) / base) * base + min_val
+            res[att <= min_val] = 0.0
+            return res
     
     def quantize_attention_log(self, att, bits):
         with torch.no_grad():
@@ -439,7 +447,7 @@ class BertSelfAttention(nn.Module):
             attention_probs = attention_probs * (attention_probs > att_threshold)
             
         if quantize > 0.0:
-            attention_probs = self.quantize_attention_bin_majority(attention_probs, quantize)
+            attention_probs = self.quantize_attention_clamped(attention_probs, quantize)
 
         # context layer size: (instance, head, seq_len, 64)
         context_layer = torch.matmul(attention_probs, value_layer)
