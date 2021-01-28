@@ -248,7 +248,8 @@ class BertSelfAttention(nn.Module):
         with torch.no_grad():
             base = (1.0 - min_val) / (2**int(bits)-1)
             res = torch.floor((att - min_val) / base) * base + min_val
-            res[att <= min_val] = 0.0
+            actual_thres = base * 0.5 + min_val
+            res[att <= actual_thres] = 0.0
             return res
     
     def quantize_attention_log(self, att, bits):

@@ -344,7 +344,7 @@ class RobertaForMaskedLM(BertPreTrainedModel):
         output_pipeline_prbs=None,
         return_dict=None,
         att_threshold=0.0,
-        hs_threshold=0.0,, 
+        hs_threshold=0.0, 
         quantize_att_bits=0.0,
         quantize_hstate_bits=0.0,
         **kwargs
