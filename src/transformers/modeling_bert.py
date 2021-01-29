@@ -288,6 +288,17 @@ class BertSelfAttention(nn.Module):
             clamped_exp[exp < (min_exp - step)] = float("-Inf")
         
         return torch.pow(2.0, clamped_exp)
+
+    def quantize_attention_log_midval(self, att, bits):
+        min_val = 1e-10
+        min_exp = math.log2(min_val)
+        base = (0-min_exp) / (2.0**bits)
+        cutpoints = [0.0] + [(i+1)*base for i in range(int(2.0**bits))]
+        offset_val = (cutpoints[2]-cutpoints[1])/2.0
+        with torch.no_grad():
+            res = torch.floor((torch.log2(att)-min_exp) / base) * base + offset_val + min_exp
+            res[att < 2**(min_exp + cutpoints[1])] = float('-Inf')
+            return 2**res
     
     def quantize_attention_log_clamped_midval(self, att, bits):
         min_val = 1e-3
@@ -478,7 +489,7 @@ class BertSelfAttention(nn.Module):
             attention_probs = attention_probs * (attention_probs > att_threshold)
             
         if quantize > 0.0:
-            attention_probs = self.quantize_attention_log_clamped_midval(attention_probs, quantize)
+            attention_probs = self.quantize_attention_log_midval(attention_probs, quantize)
 
         # context layer size: (instance, head, seq_len, 64)
         context_layer = torch.matmul(attention_probs, value_layer)
