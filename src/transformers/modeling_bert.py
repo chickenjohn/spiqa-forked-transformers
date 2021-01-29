@@ -260,6 +260,16 @@ class BertSelfAttention(nn.Module):
             actual_thres = base * 0.5 + min_val
             res[att <= actual_thres] = 0.0
             return res
+
+    def quantize_attention_uniform_clamped_midval(self, att, bits):
+        min_val = 1e-3
+        with torch.no_grad():
+            base = (1.0 - min_val) / (2.0**bits-1)
+            cutpoints = [0.0] + [(i+1)*base for i in range(int(2.0**bits-1))]
+            offset_val = (cutpoints[0] + cutpoints[1]) / 2
+            res = torch.floor((att-min_val) / base) * base + offset_val + min_val
+            res[att < min_val] = 0.0
+            return res
     
     def quantize_attention_log(self, att, bits):
         with torch.no_grad():
@@ -278,7 +288,17 @@ class BertSelfAttention(nn.Module):
             clamped_exp[exp < (min_exp - step)] = float("-Inf")
         
         return torch.pow(2.0, clamped_exp)
-
+    
+    def quantize_attention_log_clamped_midval(self, att, bits):
+        min_val = 1e-3
+        min_exp = math.log2(min_val)
+        base = (0-min_exp) / (2.0**bits - 1)
+        cutpoints = [0.0] + [(i+1)*base for i in range(int(2.0**bits-1))]
+        offset_val = (cutpoints[0]+cutpoints[1])/2.0
+        with torch.no_grad():
+            res = torch.floor((torch.log2(att)-min_exp) / base) * base + offset_val + min_exp
+            res[att < min_val] = float('-Inf')
+            return 2**res
 
     def quantize_attention_ranking_head(self, att, bits):
         import numpy as np
@@ -457,7 +477,7 @@ class BertSelfAttention(nn.Module):
             attention_probs = attention_probs * (attention_probs > att_threshold)
             
         if quantize > 0.0:
-            attention_probs = self.quantize_attention_uniform_midval(attention_probs, quantize)
+            attention_probs = self.quantize_attention_uniform_clamped_midval(attention_probs, quantize)
 
         # context layer size: (instance, head, seq_len, 64)
         context_layer = torch.matmul(attention_probs, value_layer)
