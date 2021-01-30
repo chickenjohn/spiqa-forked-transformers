@@ -1419,9 +1419,11 @@ class BertForMaskedLM(BertPreTrainedModel):
         labels=None,
         output_attentions=None,
         output_hidden_states=None,
+        output_pipeline_prbs=None,
         att_threshold=0.0,
         hs_threshold=0.0,
-        quantize=0.0,
+        quantize_att_bits=0.0,
+        quantize_hstate_bits=0.0,
         return_dict=None,
         **kwargs
     ):
@@ -1456,10 +1458,12 @@ class BertForMaskedLM(BertPreTrainedModel):
             encoder_attention_mask=encoder_attention_mask,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            output_pipeline_prbs=output_pipeline_prbs,
             return_dict=return_dict,
             att_threshold=att_threshold,
             hs_threshold=hs_threshold,
-            quantize=quantize,
+            quantize_att_bits=quantize_att_bits,
+            quantize_hstate_bits=quantize_hstate_bits,
         )
 
         sequence_output = outputs[0]
