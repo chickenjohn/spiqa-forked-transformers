@@ -316,14 +316,18 @@ class BertSelfAttention(nn.Module):
 
         log_steps = np.array([len(att_std)//np.power(2, i) for i in range(1, num_ranks)] + [len(att_std)//np.power(2, num_ranks-1), ])
         log_steps = np.cumsum(log_steps)[:-1]
-        for i in range(1, len(log_steps)):
-            if log_steps[i-1] == log_steps[i]: log_steps[i] += 1
-            
+        # for i in range(1, len(log_steps)):
+        #     if log_steps[i-1] >= log_steps[i]: log_steps[i] = log_steps[i-1]+1
+
         log_threshs += [ att_std[i] for i in log_steps]
 
         log_steps = np.insert(log_steps, 0, 0.0, axis=0)
         # value_clamp_to = [(start+end)/2.0 for start, end in zip(log_threshs[:-1], log_threshs[1:])]
-        value_clamp_to = np.array([np.mean(att_std[start:end]) for start, end in zip(log_steps[:-1], log_steps[1:])])
+        value_clamp_to = []
+        for start, end in zip(log_steps[:-1], log_steps[1:]):
+            value_clamp_to.append(np.mean(att_std[start:end]) if start < end else value_clamp_to[-1])
+
+        value_clamp_to = np.array(value_clamp_to)
         ranking_map = log_threshs[1:]
 
         # fixed ranking position based on histogram
