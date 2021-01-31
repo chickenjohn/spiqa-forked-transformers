@@ -304,7 +304,7 @@ class BertSelfAttention(nn.Module):
             return 2**res
 
 
-    def quantize_attention_uniform_slog_clamped_mean(self, att, bits):
+    def quantize_attention_uniform_slinear_clamped_mean(self, att, bits):
         import numpy as np
         from math import log
         min_val = 1e-3
@@ -312,23 +312,17 @@ class BertSelfAttention(nn.Module):
         att_std = att.to('cpu').numpy().flatten().astype('float64')
         att_std = np.sort(att_std[att_std>min_val])
         num_ranks = int(2.0**bits - 1)
-        log_threshs = [min_val,]
+        uniform_threshs = [min_val,]
 
-        log_steps = np.array([len(att_std)//np.power(2, i) for i in range(1, num_ranks)] + [len(att_std)//np.power(2, num_ranks-1), ])
-        log_steps = np.cumsum(log_steps)[:-1]
-        # for i in range(1, len(log_steps)):
-        #     if log_steps[i-1] >= log_steps[i]: log_steps[i] = log_steps[i-1]+1
+        uniform_steps = range(0, len(att_std), max(int(len(att_std)/num_ranks), 1))
 
-        log_threshs += [ att_std[i] for i in log_steps]
-
-        log_steps = np.insert(log_steps, 0, 0.0, axis=0)
-        # value_clamp_to = [(start+end)/2.0 for start, end in zip(log_threshs[:-1], log_threshs[1:])]
-        value_clamp_to = []
-        for start, end in zip(log_steps[:-1], log_steps[1:]):
-            value_clamp_to.append(np.mean(att_std[start:end]) if start < end else value_clamp_to[-1])
-
+        uniform_threshs += [ att_std[i] for i in uniform_steps[1:]]
+        value_clamp_to = [(start+end)/2.0 for start, end in zip(uniform_threshs[:-1], uniform_threshs[1:])]
         value_clamp_to = np.array(value_clamp_to)
-        ranking_map = log_threshs[1:]
+        ranking_map = uniform_threshs[1:]
+
+        if np.isnan(value_clamp_to[-1]): 
+            print("break here")
 
         # fixed ranking position based on histogram
         with torch.no_grad(): 
@@ -345,8 +339,91 @@ class BertSelfAttention(nn.Module):
             #^this shouldn't ideally affect anything. Comment it.
             quant_att = quant_att * zero_masks
 
-            if torch.sum(torch.isnan(quant_att.view(-1))) > 0:
-                print('nan in att')
+        return quant_att
+
+
+    def quantize_attention_uniform_slog_clamped_mean(self, att, bits):
+        import numpy as np
+        from math import log
+        min_val = 1e-3
+
+        att_std = att.to('cpu').numpy().flatten().astype('float64')
+        att_std = np.sort(att_std[att_std>min_val])
+        num_ranks = int(2.0**bits - 1)
+        log_threshs = [min_val,]
+
+        log_steps = np.array([len(att_std)//np.power(2, i) for i in range(1, num_ranks)] + [len(att_std)//np.power(2, num_ranks-1), ])
+        log_steps = np.cumsum(log_steps)[:-1]
+
+        log_threshs += [ att_std[i] for i in log_steps]
+
+        log_steps = np.insert(log_steps, 0, 0.0, axis=0)
+        # value_clamp_to = [(start+end)/2.0 for start, end in zip(log_threshs[:-1], log_threshs[1:])]
+        value_clamp_to = []
+        for start, end in zip(log_steps[:-1], log_steps[1:]):
+            value_clamp_to.append(np.mean(att_std[start:end]) if start < end else value_clamp_to[-1])
+
+        value_clamp_to = np.array(value_clamp_to)
+        ranking_map = log_threshs[1:]
+
+        if np.isnan(value_clamp_to[-1]): 
+            print("break here")
+
+        # fixed ranking position based on histogram
+        with torch.no_grad(): 
+            #zero_mask for vals < 1e-3, compare_done_mask for labelling values that are quantized so far.
+            device = 'cpu' if att.get_device() < 0 else att.get_device()
+            zero_masks, compare_done_mask = torch.ones(att.shape).to(device), torch.ones(att.shape).to(device)
+            zero_masks[att<min_val] = 0.0
+            quant_att = torch.zeros(att.shape).to(device)
+            for thres, val in zip(ranking_map, value_clamp_to):
+                quant_att += (att < thres) * val * compare_done_mask
+                compare_done_mask = att >= thres
+
+            quant_att += (att < 1.0) * value_clamp_to[-1] * compare_done_mask 
+            #^this shouldn't ideally affect anything. Comment it.
+            quant_att = quant_att * zero_masks
+
+        return quant_att
+
+
+    def quantize_attention_uniform_slog_mean(self, att, bits):
+        import numpy as np
+        from math import log
+
+        att_std = att.to('cpu').numpy().flatten().astype('float64')
+        att_std = np.sort(att_std)
+        num_ranks = int(2.0**bits)
+        log_threshs = [0.0,]
+
+        log_steps = np.array([len(att_std)//np.power(2, i) for i in range(1, num_ranks+1)] + [len(att_std)//np.power(2, num_ranks), ])
+        log_steps = np.cumsum(log_steps)[:-1]
+
+        log_threshs += [ att_std[i] for i in log_steps]
+
+        log_steps = np.insert(log_steps, 0, 0.0, axis=0)
+        # value_clamp_to = [(start+end)/2.0 for start, end in zip(log_threshs[:-1], log_threshs[1:])]
+        value_clamp_to = []
+        for start, end in zip(log_steps[:-1], log_steps[1:]):
+            value_clamp_to.append(np.mean(att_std[start:end]) if start < end else value_clamp_to[-1])
+
+        value_clamp_to = np.array(value_clamp_to)
+        ranking_map = log_threshs[1:]
+
+        if np.isnan(value_clamp_to[-1]): 
+            print("break here")
+
+        # fixed ranking position based on histogram
+        with torch.no_grad(): 
+            #zero_mask for vals < 1e-3, compare_done_mask for labelling values that are quantized so far.
+            device = 'cpu' if att.get_device() < 0 else att.get_device()
+            compare_done_mask = torch.ones(att.shape).to(device)
+            quant_att = torch.zeros(att.shape).to(device)
+            for thres, val in zip(ranking_map, value_clamp_to):
+                quant_att += (att < thres) * val * compare_done_mask
+                compare_done_mask = (att >= thres) & (att > 0.0)
+
+            quant_att += (att < 1.0) * value_clamp_to[-1] * compare_done_mask 
 
         return quant_att
 
@@ -459,7 +536,7 @@ class BertSelfAttention(nn.Module):
             attention_probs = attention_probs * (attention_probs > att_threshold)
 
         if quantize > 0.0:
-            attention_probs = self.quantize_attention_uniform_slog_clamped_mean(attention_probs, quantize)
+            attention_probs = self.quantize_attention_uniform_slinear_clamped_mean(attention_probs, quantize)
 
         # context layer size: (instance, head, seq_len, 64)
         context_layer = torch.matmul(attention_probs, value_layer)
