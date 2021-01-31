@@ -238,12 +238,12 @@ class BertSelfAttention(nn.Module):
         x = x.view(*new_x_shape)
         return x.permute(0, 2, 1, 3)
 
-    def quantize_attention(self, att, bits):
+    def quantize_attention_linear_slinear(self, att, bits):
         with torch.no_grad():
             base = 1.0 / (2**int(bits)-1)
             return torch.floor(att / base + 0.5) * base
 
-    def quantize_attention_uniform_midval(self, att, bits):
+    def quantize_attention_linear_slinear_midval(self, att, bits):
         with torch.no_grad():
             base = 1.0 / (2**int(bits))
             cutpoints = [0.0] + [(i+1)*base for i in range(int(2.0**bits))]
@@ -252,7 +252,7 @@ class BertSelfAttention(nn.Module):
             res[att < cutpoints[1]] = 0.0
             return res
 
-    def quantize_attention_clamped(self, att, bits):
+    def quantize_attention_linear_slinear_clamped(self, att, bits):
         min_val = 1e-3
         with torch.no_grad():
             base = (1.0 - min_val) / (2**int(bits)-1)
@@ -261,7 +261,7 @@ class BertSelfAttention(nn.Module):
             res[att <= actual_thres] = 0.0
             return res
 
-    def quantize_attention_uniform_clamped_midval(self, att, bits):
+    def quantize_attention_linear_slinear_clamped_midval(self, att, bits):
         min_val = 1e-3
         with torch.no_grad():
             base = (1.0 - min_val) / (2.0**bits-1)
@@ -270,16 +270,8 @@ class BertSelfAttention(nn.Module):
             res = torch.floor((att-min_val) / base) * base + offset_val + min_val
             res[att < min_val] = 0.0
             return res
-    
-    def quantize_attention_log(self, att, bits):
-        with torch.no_grad():
-            exp = torch.floor(torch.log2(att) + 0.5)
-            min_exp = -(2.0**bits-1)
-            clamped_exp = exp.clone()
-            clamped_exp[exp <= min_exp] = float("-Inf")
-            return torch.pow(2.0, clamped_exp)
 
-    def quantize_attention_lut(self, att, bits):
+    def quantize_attention_linear_slog(self, att, bits):
         min_exp = math.log2(1e-3)
         step = min_exp / (2.0**bits-1)
         with torch.no_grad():
@@ -289,7 +281,7 @@ class BertSelfAttention(nn.Module):
         
         return torch.pow(2.0, clamped_exp)
 
-    def quantize_attention_log_midval(self, att, bits):
+    def quantize_attention_linear_slog_midval(self, att, bits):
         min_val = 1e-10
         min_exp = math.log2(min_val)
         base = (0-min_exp) / (2.0**bits)
@@ -300,7 +292,7 @@ class BertSelfAttention(nn.Module):
             res[att < 2**(min_exp + cutpoints[1])] = float('-Inf')
             return 2**res
     
-    def quantize_attention_log_clamped_midval(self, att, bits):
+    def quantize_attention_linear_slog_clamped_midval(self, att, bits):
         min_val = 1e-3
         min_exp = math.log2(min_val)
         base = (0-min_exp) / (2.0**bits - 1)
@@ -311,72 +303,46 @@ class BertSelfAttention(nn.Module):
             res[att < min_val] = float('-Inf')
             return 2**res
 
-    def quantize_attention_ranking_head(self, att, bits):
+
+    def quantize_attention_uniform_slog_clamped_mean(self, att, bits):
         import numpy as np
         from math import log
         min_val = 1e-3
-        def ranking_search(row):
-            num_ranks = int(2.0**bits - 1)
-            thresholds = [1.0 / num_ranks * i for i in range(1, num_ranks)]
-            return [np.argmax(row > threshold) for threshold in thresholds] 
 
-        # get fixed ranking position using numpy
-        hist_x_start, hist_x_end = log(min_val, 10), log(1, 10)
-        bin_edges = 10**np.linspace(hist_x_start, hist_x_end, 100+1)
-        atts_np = np.histogram(att.to('cpu').numpy().flatten(), bin_edges, range=(min_val, 1.0))[0]
-        atts_np = np.cumsum(atts_np / np.sum(atts_np))
-        rank_idx = ranking_search(atts_np)
-        ranking_map = bin_edges[rank_idx]
-        value_clamp_to = [(start+end)/2.0 for start, end in zip([min_val] + list(ranking_map[:-1]), ranking_map)]
+        att_std = att.to('cpu').numpy().flatten().astype('float64')
+        att_std = np.sort(att_std[att_std>min_val])
+        num_ranks = int(2.0**bits - 1)
+        log_threshs = [min_val,]
+
+        log_steps = np.array([len(att_std)//np.power(2, i) for i in range(1, num_ranks)] + [len(att_std)//np.power(2, num_ranks-1), ])
+        log_steps = np.cumsum(log_steps)[:-1]
+        for i in range(1, len(log_steps)):
+            if log_steps[i-1] == log_steps[i]: log_steps[i] += 1
+            
+        log_threshs += [ att_std[i] for i in log_steps]
+
+        log_steps = np.insert(log_steps, 0, 0.0, axis=0)
+        # value_clamp_to = [(start+end)/2.0 for start, end in zip(log_threshs[:-1], log_threshs[1:])]
+        value_clamp_to = np.array([np.mean(att_std[start:end]) for start, end in zip(log_steps[:-1], log_steps[1:])])
+        ranking_map = log_threshs[1:]
 
         # fixed ranking position based on histogram
         with torch.no_grad(): 
-            zero_masks, compare_done_mask = torch.ones(att.shape).to(att.get_device()), torch.ones(att.shape).to(att.get_device())
+            #zero_mask for vals < 1e-3, compare_done_mask for labelling values that are quantized so far.
+            device = 'cpu' if att.get_device() < 0 else att.get_device()
+            zero_masks, compare_done_mask = torch.ones(att.shape).to(device), torch.ones(att.shape).to(device)
             zero_masks[att<min_val] = 0.0
-            quant_att = torch.zeros(att.shape).to(att.get_device())
+            quant_att = torch.zeros(att.shape).to(device)
             for thres, val in zip(ranking_map, value_clamp_to):
                 quant_att += (att < thres) * val * compare_done_mask
                 compare_done_mask = att >= thres
 
-            quant_att += (att < 1.0) * 1.0 * compare_done_mask
+            quant_att += (att < 1.0) * value_clamp_to[-1] * compare_done_mask 
+            #^this shouldn't ideally affect anything. Comment it.
             quant_att = quant_att * zero_masks
 
-        return quant_att
-
-    def quantize_attention_ranking_token(self, att, bits):
-        import numpy as np
-        from math import log
-        min_val = 1e-3
-        def ranking_search(row):
-            num_ranks = int(2.0**bits - 1)
-            thresholds = [1.0 / num_ranks * i for i in range(1, num_ranks)]
-            return [np.argmax(row > threshold) for threshold in thresholds] 
-
-        # get fixed ranking position using numpy
-        hist_x_start, hist_x_end = log(min_val, 10), log(1, 10)
-        bin_edges = 10**np.linspace(hist_x_start, hist_x_end, 100+1)
-        atts_np = np.apply_along_axis(
-                lambda x: np.histogram(x, bin_edges, range=(min_val, 1.0))[0], -1,  att.to('cpu').numpy())
-        atts_np = np.cumsum(np.apply_along_axis(lambda a: a / np.sum(a) if np.sum(a) > 0 else a, -1, atts_np), axis=-1)
-        rank_idx = np.apply_along_axis(ranking_search, -1, atts_np)
-        ranking_map = np.apply_along_axis(lambda x: bin_edges[x], -1, rank_idx)
-        value_clamp_to = np.apply_along_axis(lambda x: bin_edges[x-1], -1, rank_idx)
-
-        # fixed ranking position, from histogram observation
-        with torch.no_grad():
-            zero_masks, compare_done_mask = torch.ones(att.shape).to(att.get_device()), torch.ones(att.shape).to(att.get_device())
-            zero_masks[att<min_val] = 0.0
-            quant_att = torch.zeros(att.shape).to(att.get_device())
-            for thres, val in zip(np.split(ranking_map, ranking_map.shape[-1], axis=-1), np.split(value_clamp_to, value_clamp_to.shape[-1], axis=-1)):
-                ranking_map_stacked = torch.Tensor(np.concatenate([thres]*quant_att.shape[-1], axis=-1))
-                ranking_map_stacked = ranking_map_stacked.to(att.get_device())
-                val_stacked = torch.Tensor(np.concatenate([val]*quant_att.shape[-1], axis=-1))
-                val_stacked = val_stacked.to(att.get_device())
-                quant_att += (att < ranking_map_stacked) * val_stacked * compare_done_mask
-                compare_done_mask = att >= ranking_map_stacked
-
-            quant_att += (att < 1.0) * 1.0 * compare_done_mask
-            quant_att = quant_att * zero_masks
+            if torch.sum(torch.isnan(quant_att.view(-1))) > 0:
+                print('nan in att')
 
         return quant_att
 
@@ -487,13 +453,16 @@ class BertSelfAttention(nn.Module):
             # attention_probs = attention_probs * (attention_probs > abs_threshold)
             # static threshold:
             attention_probs = attention_probs * (attention_probs > att_threshold)
-            
+
         if quantize > 0.0:
-            attention_probs = self.quantize_attention_log_midval(attention_probs, quantize)
+            attention_probs = self.quantize_attention_uniform_slog_clamped_mean(attention_probs, quantize)
 
         # context layer size: (instance, head, seq_len, 64)
         context_layer = torch.matmul(attention_probs, value_layer)
         att_out_probs = context_layer.detach().clone()
+
+        if torch.sum(torch.isnan(context_layer.view(-1))) > 0:
+            print('nan in att')
 
         # transpose to (instance, seq_len, head, 64)
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
@@ -682,6 +651,7 @@ class BertLayer(nn.Module):
         quantize_att_bits=0.0,
         quantize_hstate_bits=0.0
     ):
+
         # MARK: hidden states quantization for eacy layer
         if quantize_hstate_bits > 0.0:
             hidden_states = self.quantize_hstates_fixed(hidden_states, quantize_hstate_bits, int_bits=5.0)
@@ -756,6 +726,7 @@ class BertEncoder(nn.Module):
         for i, layer_module in enumerate(self.layer):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
+
 
             if getattr(self.config, "gradient_checkpointing", False):
 
