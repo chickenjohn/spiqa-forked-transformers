@@ -247,7 +247,7 @@ class BertSelfAttention(nn.Module):
         with torch.no_grad():
             base = 1.0 / (2**int(bits))
             cutpoints = [0.0] + [(i+1)*base for i in range(int(2.0**bits))]
-            offset_val = (cutpoints[0] + cutpoints[1]) / 2
+            offset_val = (cutpoints[0] + cutpoints[1]) / 2.0
             res = torch.floor(att / base) * base + offset_val
             res[att < cutpoints[1]] = 0.0
             return res
@@ -264,11 +264,11 @@ class BertSelfAttention(nn.Module):
     def quantize_attention_linear_slinear_clamped_midval(self, att, bits):
         min_val = 1e-3
         with torch.no_grad():
-            base = (1.0 - min_val) / (2.0**bits-1)
-            cutpoints = [0.0] + [(i+1)*base for i in range(int(2.0**bits-1))]
+            base = (1.0 - min_val) / (2.0**bits)
+            cutpoints = [0.0] + [(i+1)*base for i in range(int(2.0**bits))]
             offset_val = (cutpoints[0] + cutpoints[1]) / 2
             res = torch.floor((att-min_val) / base) * base + offset_val + min_val
-            res[att < min_val] = 0.0
+            res[att < cutpoints[1]+min_val] = 0.0
             return res
 
     def quantize_attention_linear_slog(self, att, bits):
@@ -311,7 +311,7 @@ class BertSelfAttention(nn.Module):
 
         att_std = att.to('cpu').numpy().flatten().astype('float64')
         att_std = np.sort(att_std[att_std>min_val])
-        num_ranks = int(2.0**bits - 1)
+        num_ranks = int(2.0**bits-1)
         uniform_threshs = [min_val,]
 
         uniform_steps = range(0, len(att_std), max(int(len(att_std)/num_ranks), 1))
@@ -536,7 +536,7 @@ class BertSelfAttention(nn.Module):
             attention_probs = attention_probs * (attention_probs > att_threshold)
 
         if quantize > 0.0:
-            attention_probs = self.quantize_attention_uniform_slinear_clamped_mean(attention_probs, quantize)
+            attention_probs = self.quantize_attention_linear_slinear_clamped_midval(attention_probs, quantize)
 
         # context layer size: (instance, head, seq_len, 64)
         context_layer = torch.matmul(attention_probs, value_layer)
