@@ -349,10 +349,10 @@ class BertSelfAttention(nn.Module):
 
         att_std = att.to('cpu').numpy().flatten().astype('float64')
         att_std = np.sort(att_std[att_std>min_val])
-        num_ranks = int(2.0**bits - 1)
+        num_ranks = int(2.0**bits)
         log_threshs = [min_val,]
 
-        log_steps = np.array([len(att_std)//np.power(2, i) for i in range(1, num_ranks)] + [len(att_std)//np.power(2, num_ranks-1), ])
+        log_steps = np.array([len(att_std)//np.power(2, i) for i in range(1, num_ranks)] + [len(att_std)//np.power(2, num_ranks), ])
         log_steps = np.cumsum(log_steps)[:-1]
 
         log_threshs += [ att_std[i] for i in log_steps]
@@ -502,6 +502,7 @@ class BertSelfAttention(nn.Module):
             # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
             attention_scores = attention_scores + attention_mask
         # Normalize the attention scores to probabilities.
+        attention_scores = torch.floor(attention_scores)
         attention_probs = nn.Softmax(dim=-1)(attention_scores)
         # MARK: customized mask
         for i in range(attention_probs.shape[0]):
@@ -536,7 +537,7 @@ class BertSelfAttention(nn.Module):
             attention_probs = attention_probs * (attention_probs > att_threshold)
 
         if quantize > 0.0:
-            attention_probs = self.quantize_attention_linear_slinear_clamped_midval(attention_probs, quantize)
+            attention_probs = self.quantize_attention_linear_slog_clamped_midval(attention_probs, quantize)
 
         # context layer size: (instance, head, seq_len, 64)
         context_layer = torch.matmul(attention_probs, value_layer)
