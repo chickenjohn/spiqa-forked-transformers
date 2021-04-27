@@ -502,7 +502,6 @@ class BertSelfAttention(nn.Module):
             # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
             attention_scores = attention_scores + attention_mask
         # Normalize the attention scores to probabilities.
-        attention_scores = torch.floor(attention_scores)
         attention_probs = nn.Softmax(dim=-1)(attention_scores)
         # MARK: customized mask
         for i in range(attention_probs.shape[0]):
