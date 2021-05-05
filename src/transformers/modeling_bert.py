@@ -465,8 +465,8 @@ class BertSelfAttention(nn.Module):
     def q8_quant_clamped(self, att, bits, min_val, max_val):
         base = (max_val - min_val) / (2**int(bits)-1)
         cutpoints = [0.0] + [(i+1)*base for i in range(int(2.0**bits-1))]
-        res = np.floor((att - min_val) / base) * base + min_val
-        res[att < min_val] = 0.0
+        res = torch.floor((att - min_val) / base) * base + min_val
+        res[att < (cutpoints[1]+min_val)] = 0.0 
         res[att > max_val] = max_val
         return res
 
@@ -544,7 +544,7 @@ class BertSelfAttention(nn.Module):
             attention_probs = attention_probs * (attention_probs > att_threshold)
 
         if quantize > 0.0:
-            attention_probs = self.q8_quant_clamped(attention_probs, quantize, 0.0099, 0.98499)
+            attention_probs = self.q8_quant_clamped(attention_probs, quantize, 0.0019, 0.998)
 
         # context layer size: (instance, head, seq_len, 64)
         context_layer = torch.matmul(attention_probs, value_layer)
