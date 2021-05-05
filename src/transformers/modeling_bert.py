@@ -462,13 +462,23 @@ class BertSelfAttention(nn.Module):
 
         return quant_att
 
-    def q8_quant_clamped(self, att, bits, min_val, max_val):
+    def quant_8_linear(self, att, bits, min_val, max_val):
         base = (max_val - min_val) / (2**int(bits)-1)
         cutpoints = [0.0] + [(i+1)*base for i in range(int(2.0**bits-1))]
         res = torch.floor((att - min_val) / base) * base + min_val
         res[att < (cutpoints[1]+min_val)] = 0.0 
         res[att > max_val] = max_val
         return res
+
+    def quant_8_log(self, att, bits, min_val, max_val):
+        min_exp, max_exp = math.log2(min_val), math.log2(max_val)
+        base = (max_exp-min_exp) / (2.0**bits - 1)
+        cutpoints = [0.0] + [(i+1)*base for i in range(int(2.0**bits-1))]
+        with torch.no_grad():
+            res = torch.floor((torch.log2(att)-min_exp) / base) * base + min_exp
+            res[att < 2**(cutpoints[1]+min_exp)] = float('-Inf')
+            res[att > max_val] = max_exp
+            return 2**res
 
     def forward(
         self,
@@ -544,7 +554,7 @@ class BertSelfAttention(nn.Module):
             attention_probs = attention_probs * (attention_probs > att_threshold)
 
         if quantize > 0.0:
-            attention_probs = self.q8_quant_clamped(attention_probs, quantize, 0.0019, 0.998)
+            attention_probs = self.quant_8_log(attention_probs, quantize, 0.0019, 0.998)
 
         # context layer size: (instance, head, seq_len, 64)
         context_layer = torch.matmul(attention_probs, value_layer)
