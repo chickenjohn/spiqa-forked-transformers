@@ -293,15 +293,19 @@ class BertSelfAttention(nn.Module):
             return 2**res
     
     def quantize_attention_linear_slog_clamped_midval(self, att, bits):
+        import numpy as np
         min_val = 1e-3
         min_exp = math.log2(min_val)
         base = (0-min_exp) / (2.0**bits - 1)
         cutpoints = [0.0] + [(i+1)*base for i in range(int(2.0**bits-1))]
+        real_cutpoints = [2**(i+min_exp) for i in cutpoints[1:]]
         offset_val = (cutpoints[0]+cutpoints[1])/2.0
         with torch.no_grad():
             res = torch.floor((torch.log2(att)-min_exp) / base) * base + offset_val + min_exp
             res[att < min_val] = float('-Inf')
-            return 2**res
+            res = 2**res
+            res[res > 1.0] = 2**(base*int(2**bits-2) + offset_val + min_exp)
+            return res
 
 
     def quantize_attention_uniform_slinear_clamped_mean(self, att, bits):
@@ -554,7 +558,8 @@ class BertSelfAttention(nn.Module):
             attention_probs = attention_probs * (attention_probs > att_threshold)
 
         if quantize > 0.0:
-            attention_probs = self.quant_8_log(attention_probs, quantize, 0.0019, 0.998)
+            # attention_probs = self.quant_8_log(attention_probs, quantize, 0.0019, 0.998)
+            attention_probs = self.quantize_attention_linear_slog_clamped_midval(attention_probs, quantize)
 
         # context layer size: (instance, head, seq_len, 64)
         context_layer = torch.matmul(attention_probs, value_layer)
